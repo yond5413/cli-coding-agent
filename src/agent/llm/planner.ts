@@ -1,11 +1,12 @@
 import { LLMClient } from './client.js'
 
 export interface AgentAction {
-  type: 'read' | 'write' | 'run' | 'rollback'
+  type: 'read' | 'write' | 'run' | 'rollback' | 'chat'
   target?: string
   content?: string
   command?: string
   reasoning?: string
+  message?: string
 }
 
 export class Planner {
@@ -23,7 +24,8 @@ Available actions:
 - {"type": "write", "target": "filepath", "content": "code", "reasoning": "why"} - Write/modify a file  
 - {"type": "run", "command": "shell command", "reasoning": "why"} - Execute a command
 - {"type": "rollback", "reasoning": "why"} - Undo last change
-
+- {"type": "chat", "message": "user question", "reasoning": "why"} - Have a conversation/provide explanation
+-
 Context from previous actions:
 ${context}
 

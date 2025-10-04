@@ -39,7 +39,8 @@ export class CodingAgent {
       // Still store failed attempts in memory for context
       this.memory.addEntry(instruction, { type: 'read', reasoning: 'Failed attempt' }, errorMessage)
       
-      throw error
+      // Don't throw error - let the CLI continue running
+      console.log('🔄 Ready for next command...')
     }
   }
 
