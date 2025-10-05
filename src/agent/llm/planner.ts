@@ -25,7 +25,7 @@ Available actions:
 - {"type": "run", "command": "shell command", "reasoning": "why"} - Execute a command
 - {"type": "rollback", "reasoning": "why"} - Undo last change
 - {"type": "chat", "message": "user question", "reasoning": "why"} - Have a conversation/provide explanation
--
+
 Context from previous actions:
 ${context}
 
@@ -33,7 +33,8 @@ Rules:
 - Always include reasoning field
 - For write actions, generate complete file content
 - For run actions, use safe commands
-- Respond ONLY with valid JSON`
+- Respond ONLY with valid JSON
+- If unsure about the action type, default to "chat"`
 
     const response = await this.llm.chat([
       { role: 'system', content: systemPrompt },
@@ -41,9 +42,34 @@ Rules:
     ])
 
     try {
-      return JSON.parse(response)
+      // Handle empty or invalid responses
+      if (!response || response.trim() === '') {
+        return {
+          type: 'chat',
+          message: instruction,
+          reasoning: 'Empty LLM response, defaulting to chat'
+        }
+      }
+      
+      const parsed = JSON.parse(response)
+      
+      // Validate required fields
+      if (!parsed.type) {
+        return {
+          type: 'chat',
+          message: instruction,
+          reasoning: 'Invalid action type, defaulting to chat'
+        }
+      }
+      
+      return parsed
     } catch (error) {
-      throw new Error(`Failed to parse LLM response: ${response}`)
+      // If JSON parsing fails, default to chat
+      return {
+        type: 'chat',
+        message: instruction,
+        reasoning: `Failed to parse LLM response, defaulting to chat. Original response: ${response?.substring(0, 100)}...`
+      }
     }
   }
 }
