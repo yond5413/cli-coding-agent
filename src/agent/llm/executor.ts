@@ -6,8 +6,17 @@ import { rollback } from '../tools/rollback.js'
 import { chat } from '../tools/chat.js'
 
 import { logExecuting, logError } from '../../utils/io.js'
+import { Interface as ReadlineInterface } from 'readline'
 
 export class Executor {
+  private rl?: ReadlineInterface
+
+  constructor(rl?: ReadlineInterface) {
+    if (rl) {
+      this.rl = rl
+    }
+  }
+
   async execute(action: AgentAction, context?: string): Promise<string> {
     logExecuting(action.type, action.reasoning || 'No reasoning provided')
     
@@ -19,7 +28,7 @@ export class Executor {
           
         case 'write':
           if (!action.target || !action.content) throw new Error('Write action requires target and content')
-          await writeFile(action.target, action.content)
+          await writeFile(action.target, action.content, this.rl)
           return `Written to ${action.target}`
           
         case 'run':

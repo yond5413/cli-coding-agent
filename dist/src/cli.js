@@ -8,7 +8,7 @@ import dotenv from 'dotenv';
 dotenv.config({ path: '.env' });
 dotenv.config({ path: '.env.local' });
 // Slash command handlers
-function handleSlashCommand(command, agent) {
+async function handleSlashCommand(command, agent) {
     const cmd = command.toLowerCase().trim();
     switch (cmd) {
         case '/help':
@@ -24,6 +24,7 @@ function handleSlashCommand(command, agent) {
    • /help     - Show this help message
    • /clear    - Clear the terminal screen
    • /memory   - Show conversation history
+   • /context  - Show system and project context
    • /exit     - Quit the application
 
 💡 Examples:
@@ -44,6 +45,18 @@ function handleSlashCommand(command, agent) {
             console.log(context);
             printSeparator();
             return true;
+        case '/context':
+            printHeader('System & Project Context');
+            try {
+                const { generateSystemPromptContext } = await import('./utils/system-context.js');
+                const sysContext = await generateSystemPromptContext();
+                console.log(sysContext);
+            }
+            catch (error) {
+                logError(`Failed to load context: ${error instanceof Error ? error.message : String(error)}`);
+            }
+            printSeparator();
+            return true;
         case '/exit':
             console.log('\n👋 Goodbye!');
             process.exit(0);
@@ -60,11 +73,14 @@ async function runInteractiveMode() {
         logInfo('Create a .env file with: OPENROUTER_API_KEY=your_key_here');
         process.exit(1);
     }
-    const agent = new CodingAgent();
+    // Create a single readline interface instance to manage all user input
+    // This prevents conflicts when multiple components need to ask questions
     const rl = createInterface({
         input: process.stdin,
         output: process.stdout
     });
+    // Pass the readline interface to the agent so it can be shared with all tools
+    const agent = new CodingAgent(rl);
     // Clear screen and show welcome
     console.clear();
     printWelcome();
@@ -89,7 +105,7 @@ async function runInteractiveMode() {
             }
             // Handle slash commands
             if (instruction.startsWith('/')) {
-                handleSlashCommand(instruction, agent);
+                await handleSlashCommand(instruction, agent);
                 continue;
             }
             // Process the instruction

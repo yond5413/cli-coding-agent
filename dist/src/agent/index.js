@@ -3,12 +3,18 @@ import { Executor } from './llm/executor.js';
 import { Memory } from './memory.js';
 import { MultiStepPlanner } from './planner.js';
 import { logProcessing, logPlanned, logCompleted, logError, showLoadingSpinner, showThinkingIndicator, logInfo } from '../utils/io.js';
+import { Interface as ReadlineInterface } from 'readline';
 export class CodingAgent {
-    constructor() {
+    constructor(rl) {
         this.planner = new Planner();
-        this.multiStepPlanner = new MultiStepPlanner();
-        this.executor = new Executor();
+        // Pass the shared readline interface to components that need user input
+        this.multiStepPlanner = new MultiStepPlanner(rl);
+        this.executor = new Executor(rl);
         this.memory = new Memory();
+        // Store reference for use in this class's methods
+        if (rl) {
+            this.rl = rl;
+        }
     }
     async processInstruction(instruction) {
         logProcessing(instruction);
@@ -103,18 +109,17 @@ export class CodingAgent {
         logCompleted(instruction);
     }
     async askContinueAfterError() {
-        // Use direct stdin/stdout to avoid readline conflicts
-        process.stdout.write('\n⚠️ Step failed. Continue with remaining steps? (y/N): ');
-        return new Promise((resolve) => {
-            const onData = (data) => {
-                const answer = data.toString().trim();
-                process.stdin.removeListener('data', onData);
-                process.stdin.pause();
-                resolve(answer.toLowerCase().startsWith('y'));
-            };
-            process.stdin.resume();
-            process.stdin.once('data', onData);
-        });
+        // Use the shared readline interface for consistent user interaction
+        // This prevents stdin conflicts that would occur with direct stdin access
+        if (this.rl) {
+            return new Promise((resolve) => {
+                this.rl.question('\n⚠️ Step failed. Continue with remaining steps? (y/N): ', (answer) => {
+                    resolve(answer.toLowerCase().startsWith('y'));
+                });
+            });
+        }
+        // Fallback for non-interactive mode when no readline interface is available
+        return false;
     }
     getMemory() {
         return this.memory;

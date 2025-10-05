@@ -4,7 +4,13 @@ import { runCommand } from '../tools/runCommand.js';
 import { rollback } from '../tools/rollback.js';
 import { chat } from '../tools/chat.js';
 import { logExecuting, logError } from '../../utils/io.js';
+import { Interface as ReadlineInterface } from 'readline';
 export class Executor {
+    constructor(rl) {
+        if (rl) {
+            this.rl = rl;
+        }
+    }
     async execute(action, context) {
         logExecuting(action.type, action.reasoning || 'No reasoning provided');
         try {
@@ -16,7 +22,7 @@ export class Executor {
                 case 'write':
                     if (!action.target || !action.content)
                         throw new Error('Write action requires target and content');
-                    await writeFile(action.target, action.content);
+                    await writeFile(action.target, action.content, this.rl);
                     return `Written to ${action.target}`;
                 case 'run':
                     if (!action.command)

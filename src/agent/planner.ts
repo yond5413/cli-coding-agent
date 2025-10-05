@@ -1,6 +1,8 @@
 import { LLMClient } from './llm/client.js'
 import type { AgentAction } from './llm/planner.js'
 import { logInfo, printHeader, printSeparator } from '../utils/io.js'
+import { generateSystemPromptContext } from '../utils/system-context.js'
+import { Interface as ReadlineInterface } from 'readline'
 
 export interface PlanStep {
   step: number
@@ -19,13 +21,35 @@ export interface ExecutionPlan {
 
 export class MultiStepPlanner {
   private llm: LLMClient
+  private rl?: ReadlineInterface
+  private systemContextCache?: string
 
-  constructor() {
+  constructor(rl?: ReadlineInterface) {
     this.llm = new LLMClient()
+    if (rl) {
+      this.rl = rl
+    }
+  }
+
+  /**
+   * Get or generate system context (cached for performance)
+   */
+  private async getSystemContext(): Promise<string> {
+    if (!this.systemContextCache) {
+      this.systemContextCache = await generateSystemPromptContext()
+    }
+    return this.systemContextCache
   }
 
   async createPlan(instruction: string, context: string): Promise<ExecutionPlan> {
-    const systemPrompt = `You are an expert coding assistant that creates detailed execution plans.
+    // Get system context for OS and file tree awareness
+    const systemContext = await this.getSystemContext()
+    
+    const systemPrompt = `You are an expert coding assistant that creates detailed execution plans with full system awareness.
+
+${systemContext}
+
+# Planning Task
 
 Given a user instruction, create a comprehensive plan with multiple steps if needed.
 
@@ -52,16 +76,28 @@ Respond with a JSON object in this exact format:
   ]
 }
 
-Context from previous actions:
-${context}
+# Context from Previous Actions
 
-Rules:
-- Break complex tasks into logical steps
-- Each step should be atomic and focused
-- Include dependencies between steps
-- For simple tasks, create a single step
-- For complex tasks, create 3-7 steps maximum
-- Always include reasoning for each step`
+${context || 'No previous context'}
+
+# Critical Planning Rules
+
+1. **OS Awareness**: All shell commands must be appropriate for the detected operating system
+2. **File Awareness**: Only reference files that exist in the project structure or that you will create
+3. **Step Dependencies**: Clearly mark which steps depend on others
+4. **Atomicity**: Each step should be atomic and focused on one task
+5. **Complexity**: For simple tasks, create 1-2 steps; for complex tasks, 3-7 steps maximum
+6. **Reasoning**: Always explain why each step is necessary
+7. **Command Safety**: Verify all commands are safe and OS-appropriate
+8. **Path Correctness**: Use correct path separators for the current OS
+
+# Planning Guidelines
+
+- Break complex tasks into logical, sequential steps
+- Consider the current project structure when planning file operations
+- Use OS-appropriate commands (Windows vs Unix)
+- Include verification steps for critical operations
+- Always provide clear reasoning for the plan structure`
 
     const response = await this.llm.chat([
       { role: 'system', content: systemPrompt },
@@ -136,19 +172,15 @@ Rules:
   }
 
   async confirmPlan(plan: ExecutionPlan): Promise<boolean> {
-    // Use direct stdin/stdout to avoid readline conflicts
-    process.stdout.write('\n🤔 Proceed with this plan? (y/N): ')
+    if (this.rl) {
+      return new Promise((resolve) => {
+        this.rl!.question('\n🤔 Proceed with this plan? (y/N): ', (answer) => {
+          resolve(answer.toLowerCase().startsWith('y'))
+        })
+      })
+    }
     
-    return new Promise((resolve) => {
-      const onData = (data: Buffer) => {
-        const answer = data.toString().trim()
-        process.stdin.removeListener('data', onData)
-        process.stdin.pause()
-        resolve(answer.toLowerCase().startsWith('y'))
-      }
-      
-      process.stdin.resume()
-      process.stdin.once('data', onData)
-    })
+    // Fallback for non-interactive mode
+    return false
   }
 }

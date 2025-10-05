@@ -1,6 +1,7 @@
 import { writeFile as fsWriteFile, readFile as fsReadFile } from 'fs/promises'
-import { createTwoFilesPatch } from 'diff'
-import { createInterface } from 'readline'
+import { diffLines } from 'diff'
+import type { Change } from 'diff'
+import { Interface as ReadlineInterface } from 'readline'
 import { exec } from 'child_process'
 import { promisify } from 'util'
 import * as fs from 'fs'
@@ -8,7 +9,7 @@ import * as path from 'path'
 
 const execAsync = promisify(exec)
 
-export async function writeFile(filepath: string, content: string): Promise<void> {
+export async function writeFile(filepath: string, content: string, rl?: ReadlineInterface): Promise<void> {
   try {
     // Read existing file for diff
     let existingContent = ''
@@ -20,16 +21,24 @@ export async function writeFile(filepath: string, content: string): Promise<void
 
     // Show diff if file exists
     if (existingContent) {
-      await showDiffInEditor(filepath, existingContent, content)
+      showInlineDiff(filepath, existingContent, content)
     } else {
-      console.log(`📝 New file content for ${filepath}:`)
-      console.log('--- Content Preview ---')
-      console.log(content.length > 500 ? content.substring(0, 500) + '...' : content)
-      console.log('--- End Preview ---')
+      console.log(`\n📝 New file content for ${filepath}:`)
+      console.log('\x1b[2m╭─────────────────────────────────────────────────────────────╮\x1b[0m')
+      const lines = content.split('\n')
+      const previewLines = lines.slice(0, 20)
+      previewLines.forEach((line, idx) => {
+        const lineNum = String(idx + 1).padStart(4)
+        console.log(`\x1b[32m+ ${lineNum}\x1b[0m | ${line}`)
+      })
+      if (lines.length > 20) {
+        console.log(`\x1b[2m   ... (${lines.length - 20} more lines)\x1b[0m`)
+      }
+      console.log('\x1b[2m╰─────────────────────────────────────────────────────────────╯\x1b[0m')
     }
 
     // Ask for confirmation
-    const confirmed = await askConfirmation('Apply these changes?')
+    const confirmed = await askConfirmation('Apply these changes?', rl)
     
     if (confirmed) {
       await fsWriteFile(filepath, content, 'utf-8')
@@ -45,57 +54,72 @@ export async function writeFile(filepath: string, content: string): Promise<void
   }
 }
 
-async function showDiffInEditor(filepath: string, oldContent: string, newContent: string): Promise<void> {
-  try {
-    // Create temporary files for diff viewing
-    const tempDir = path.join(process.cwd(), '.temp-diffs')
-    if (!fs.existsSync(tempDir)) {
-      fs.mkdirSync(tempDir, { recursive: true })
-    }
+function showInlineDiff(filepath: string, oldContent: string, newContent: string): void {
+  const changes = diffLines(oldContent, newContent)
+  
+  console.log(`\n📝 Changes to \x1b[1m${filepath}\x1b[0m:`)
+  console.log('\x1b[2m╭─────────────────────────────────────────────────────────────╮\x1b[0m')
+  
+  let oldLineNum = 1
+  let newLineNum = 1
+  let changeCount = 0
+  const maxLines = 50 // Limit display to avoid overwhelming output
+  
+  for (const change of changes) {
+    const lines = change.value.split('\n')
+    // Remove empty last line from split
+    if (lines[lines.length - 1] === '') lines.pop()
     
-    const timestamp = Date.now()
-    const oldFile = path.join(tempDir, `${path.basename(filepath)}.old.${timestamp}`)
-    const newFile = path.join(tempDir, `${path.basename(filepath)}.new.${timestamp}`)
-    
-    // Write temporary files
-    await fsWriteFile(oldFile, oldContent, 'utf-8')
-    await fsWriteFile(newFile, newContent, 'utf-8')
-    
-    console.log(`📝 Opening diff in editor for ${filepath}...`)
-    console.log(`💡 Compare: ${oldFile} vs ${newFile}`)
-    
-    // Try to open in VS Code, then fall back to system default
-    try {
-      await execAsync(`code --diff "${oldFile}" "${newFile}"`)
-      console.log('✅ Opened diff in VS Code')
-    } catch (error) {
-      // Fallback to system default editor or just show file paths
-      console.log('⚠️ Could not open in VS Code, files created for manual comparison:')
-      console.log(`   Original: ${oldFile}`)
-      console.log(`   Modified: ${newFile}`)
-    }
-    
-    // Clean up temp files after a delay
-    setTimeout(() => {
-      try {
-        fs.unlinkSync(oldFile)
-        fs.unlinkSync(newFile)
-      } catch (error) {
-        // Ignore cleanup errors
+    for (const line of lines) {
+      if (changeCount >= maxLines) break
+      
+      if (change.added) {
+        // Green for added lines
+        const lineNum = String(newLineNum).padStart(4)
+        console.log(`\x1b[32m+ ${lineNum}\x1b[0m | \x1b[32m${line}\x1b[0m`)
+        newLineNum++
+        changeCount++
+      } else if (change.removed) {
+        // Red for removed lines
+        const lineNum = String(oldLineNum).padStart(4)
+        console.log(`\x1b[31m- ${lineNum}\x1b[0m | \x1b[31m${line}\x1b[0m`)
+        oldLineNum++
+        changeCount++
+      } else {
+        // Gray for unchanged context lines (show limited context)
+        if (changeCount < 3 || changeCount > changes.length - 3) {
+          const lineNum = String(oldLineNum).padStart(4)
+          console.log(`\x1b[2m  ${lineNum}\x1b[0m | \x1b[2m${line}\x1b[0m`)
+        }
+        oldLineNum++
+        newLineNum++
       }
-    }, 30000) // 30 seconds
+    }
     
-  } catch (error) {
-    console.error('❌ Failed to create diff view:', error)
-    // Fallback to terminal diff
-    const patch = createTwoFilesPatch(filepath, filepath, oldContent, newContent)
-    console.log(`📝 Changes to ${filepath}:`)
-    console.log(patch)
+    if (changeCount >= maxLines) {
+      console.log(`\x1b[2m   ... (diff truncated, showing first ${maxLines} changes)\x1b[0m`)
+      break
+    }
   }
+  
+  console.log('\x1b[2m╰─────────────────────────────────────────────────────────────╯\x1b[0m')
+  
+  // Summary
+  const addedCount = changes.filter(c => c.added).reduce((acc, c) => acc + c.count!, 0)
+  const removedCount = changes.filter(c => c.removed).reduce((acc, c) => acc + c.count!, 0)
+  console.log(`\x1b[32m+${addedCount} lines\x1b[0m | \x1b[31m-${removedCount} lines\x1b[0m\n`)
 }
 
-async function askConfirmation(question: string): Promise<boolean> {
-  // Use process.stdout.write and process.stdin directly to avoid readline conflicts
+async function askConfirmation(question: string, rl?: ReadlineInterface): Promise<boolean> {
+  if (rl) {
+    return new Promise((resolve) => {
+      rl.question(`${question} (y/N): `, (answer) => {
+        resolve(answer.toLowerCase().startsWith('y'))
+      })
+    })
+  }
+  
+  // Fallback for non-interactive mode
   process.stdout.write(`${question} (y/N): `)
   
   return new Promise((resolve) => {

@@ -1,10 +1,12 @@
 import { Memory } from './memory.js';
+import { Interface as ReadlineInterface } from 'readline';
 export declare class CodingAgent {
     private planner;
     private multiStepPlanner;
     private executor;
     private memory;
-    constructor();
+    private rl?;
+    constructor(rl?: ReadlineInterface);
     processInstruction(instruction: string): Promise<void>;
     private shouldUsePlanningMode;
     private executeWithPlanning;

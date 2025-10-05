@@ -3,18 +3,27 @@ import { Executor } from './llm/executor.js'
 import { Memory } from './memory.js'
 import { MultiStepPlanner } from './planner.js'
 import { logProcessing, logPlanned, logCompleted, logError, showLoadingSpinner, showThinkingIndicator, logInfo } from '../utils/io.js'
+import { Interface as ReadlineInterface } from 'readline'
 
 export class CodingAgent {
   private planner: Planner
   private multiStepPlanner: MultiStepPlanner
   private executor: Executor
   private memory: Memory
+  // Shared readline interface for all user interactions
+  // This prevents stdin conflicts between different components
+  private rl?: ReadlineInterface
 
-  constructor() {
+  constructor(rl?: ReadlineInterface) {
     this.planner = new Planner()
-    this.multiStepPlanner = new MultiStepPlanner()
-    this.executor = new Executor()
+    // Pass the shared readline interface to components that need user input
+    this.multiStepPlanner = new MultiStepPlanner(rl)
+    this.executor = new Executor(rl)
     this.memory = new Memory()
+    // Store reference for use in this class's methods
+    if (rl) {
+      this.rl = rl
+    }
   }
 
   async processInstruction(instruction: string): Promise<void> {
@@ -138,20 +147,18 @@ export class CodingAgent {
   }
 
   private async askContinueAfterError(): Promise<boolean> {
-    // Use direct stdin/stdout to avoid readline conflicts
-    process.stdout.write('\n⚠️ Step failed. Continue with remaining steps? (y/N): ')
+    // Use the shared readline interface for consistent user interaction
+    // This prevents stdin conflicts that would occur with direct stdin access
+    if (this.rl) {
+      return new Promise((resolve) => {
+        this.rl!.question('\n⚠️ Step failed. Continue with remaining steps? (y/N): ', (answer) => {
+          resolve(answer.toLowerCase().startsWith('y'))
+        })
+      })
+    }
     
-    return new Promise((resolve) => {
-      const onData = (data: Buffer) => {
-        const answer = data.toString().trim()
-        process.stdin.removeListener('data', onData)
-        process.stdin.pause()
-        resolve(answer.toLowerCase().startsWith('y'))
-      }
-      
-      process.stdin.resume()
-      process.stdin.once('data', onData)
-    })
+    // Fallback for non-interactive mode when no readline interface is available
+    return false
   }
 
   getMemory(): Memory {
